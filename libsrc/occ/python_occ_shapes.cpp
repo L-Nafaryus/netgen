@@ -38,6 +38,8 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
@@ -139,6 +141,10 @@ public:
       sub.push_back(shape);
     return sub;
   }
+    ListOfShapes Shells() const
+    {
+        return SubShapes(TopAbs_SHELL);
+    }
   ListOfShapes Solids() const
   {
     return SubShapes(TopAbs_SOLID);
@@ -716,6 +722,13 @@ DLL_HEADER void ExportNgOCCShapes(py::module &m)
         solids.push_back(e.Current());
       return solids;
     }, "returns all sub-shapes of type 'SOLID'")
+    .def_property_readonly("shells", [] (const TopoDS_Shape & shape)
+    {
+        ListOfShapes shells;
+        for(TopExp_Explorer e(shape, TopAbs_SHELL); e.More(); e.Next())
+            shells.push_back(e.Current());
+        return shells;
+    }, "returns all sub-shapes of type 'SHELL'")
     .def_property_readonly("faces", [] (const TopoDS_Shape & shape)
          {
            ListOfShapes sub;
@@ -768,17 +781,20 @@ DLL_HEADER void ExportNgOCCShapes(py::module &m)
            return props.CentreOfMass();
       }, "returns center of gravity of shape")
     
-    .def_property_readonly("mass", [](const TopoDS_Shape & shape) {
-           GProp_GProps props;
-           switch (shape.ShapeType())
-             {
-             case TopAbs_FACE:
-               BRepGProp::SurfaceProperties (shape, props); break;
-             default:
-               BRepGProp::LinearProperties(shape, props);
-             }
-           return props.Mass();
-      }, "returns mass of shape, what is length, face, or volume")
+    .def_property_readonly("mass", [](const TopoDS_Shape & shape) 
+    {
+        GProp_GProps props;
+        switch (shape.ShapeType())
+        {
+            case TopAbs_SOLID:
+                BRepGProp::VolumeProperties(shape, props); break;
+            case TopAbs_FACE:
+                BRepGProp::SurfaceProperties(shape, props); break;
+            default:
+                BRepGProp::LinearProperties(shape, props);
+        }
+        return props.Mass();
+    }, "returns mass of shape, what is length, face, or volume")
 
     .def("Move", [](const TopoDS_Shape & shape, const gp_Vec v)
          {
@@ -1465,8 +1481,33 @@ DLL_HEADER void ExportNgOCCShapes(py::module &m)
         return make_shared<WorkPlane> (ax);
       })
     ;
-  py::class_<TopoDS_Solid, TopoDS_Shape> (m, "Solid");
-  
+
+    /*py::class_<TopoDS_Shell, TopoDS_Shape> (m, "Shell")
+        .def(py::init([](std::vector<TopoDS_Shape> faces) 
+        {
+            BRepBuilderAPI_Sewing Sew;
+
+            for (auto f : faces)
+                Sew.Add(f);
+
+            Sew.Perform();
+              
+            return Sew.SewedShape(); 
+        }))
+    ;*/
+
+
+    py::class_<TopoDS_Solid, TopoDS_Shape> (m, "Solid")
+        .def(py::init([](TopoDS_Shell shell) 
+        {
+            return BRepBuilderAPI_MakeSolid(shell).Solid(); 
+        }))
+        .def(py::init([](TopoDS_Shape shape) 
+        {
+            return BRepBuilderAPI_MakeSolid(TopoDS::Shell(shape)).Solid(); 
+        }))
+    ;
+
   py::class_<TopoDS_Compound, TopoDS_Shape> (m, "Compound")
     .def(py::init([](std::vector<TopoDS_Shape> shapes) {
           BRep_Builder builder;
@@ -1476,6 +1517,17 @@ DLL_HEADER void ExportNgOCCShapes(py::module &m)
             builder.Add(comp, s);
           return comp;
         }))
+    .def("ToShell", [](std::vector<TopoDS_Shape> faces) {
+        BRepBuilderAPI_Sewing Sew;
+
+        for (auto f : faces)
+            Sew.Add(f);
+
+        Sew.Perform();
+          
+        TopoDS_Shape res = Sew.SewedShape();
+        return res;
+    })
     ;
 
 
@@ -1564,6 +1616,7 @@ DLL_HEADER void ExportNgOCCShapes(py::module &m)
                selected.push_back(s);
            return selected;
          })
+    .def_property_readonly("shells", &ListOfShapes::Shells)
     .def_property_readonly("solids", &ListOfShapes::Solids)
     .def_property_readonly("faces", &ListOfShapes::Faces)
     .def_property_readonly("edges", &ListOfShapes::Edges)
