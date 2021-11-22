@@ -736,7 +736,13 @@ DLL_HEADER void ExportNgOCCShapes(py::module &m)
              sub.push_back(e.Current());
            return sub;
          }, "returns all sub-shapes of type 'FACE'")
-    
+    .def_property_readonly("wires", [] (const TopoDS_Shape & shape)
+    {
+        ListOfShapes wires;
+        for(TopExp_Explorer e(shape, TopAbs_WIRE); e.More(); e.Next())
+            wires.push_back(e.Current());
+        return wires;
+    }, "returns all sub-shapes of type 'SHELL'")  
     .def_property_readonly("edges", [] (const TopoDS_Shape & shape)
          {
            ListOfShapes sub;
@@ -787,6 +793,7 @@ DLL_HEADER void ExportNgOCCShapes(py::module &m)
         switch (shape.ShapeType())
         {
             case TopAbs_SOLID:
+                // TODO: sometimes produces negative value (but correct)
                 BRepGProp::VolumeProperties(shape, props); break;
             case TopAbs_FACE:
                 BRepGProp::SurfaceProperties(shape, props); break;
@@ -1506,28 +1513,39 @@ DLL_HEADER void ExportNgOCCShapes(py::module &m)
         {
             return BRepBuilderAPI_MakeSolid(TopoDS::Shell(shape)).Solid(); 
         }))
+        .def(py::init([](std::vector<TopoDS_Shape> faces) 
+        {
+            BRepBuilderAPI_Sewing Sew;
+
+            for (auto f : faces)
+                Sew.Add(f);
+
+            Sew.Perform();
+              
+            TopoDS_Shape shape = Sew.SewedShape();
+            /*ListOfShapes sub;
+
+            for (TopExp_Explorer e(shape, TopAbs_SHELL); e.More(); e.Next())
+            {
+                BRepBuilderAPI_MakeSolid nextSolid(TopoDS::Shell(e.Current()));
+                sub.push_back(nextSolid);
+            }
+
+            return sub*/
+            return BRepBuilderAPI_MakeSolid(TopoDS::Shell(shape)).Solid();
+        }))
     ;
 
-  py::class_<TopoDS_Compound, TopoDS_Shape> (m, "Compound")
-    .def(py::init([](std::vector<TopoDS_Shape> shapes) {
-          BRep_Builder builder;
-          TopoDS_Compound comp;
-          builder.MakeCompound(comp);
-          for(auto& s : shapes)
-            builder.Add(comp, s);
-          return comp;
+    py::class_<TopoDS_Compound, TopoDS_Shape> (m, "Compound")
+        .def(py::init([](std::vector<TopoDS_Shape> shapes) 
+        {
+            BRep_Builder builder;
+            TopoDS_Compound comp;
+            builder.MakeCompound(comp);
+            for(auto& s : shapes)
+                builder.Add(comp, s);
+            return comp;
         }))
-    .def("ToShell", [](std::vector<TopoDS_Shape> faces) {
-        BRepBuilderAPI_Sewing Sew;
-
-        for (auto f : faces)
-            Sew.Add(f);
-
-        Sew.Perform();
-          
-        TopoDS_Shape res = Sew.SewedShape();
-        return res;
-    })
     ;
 
 
